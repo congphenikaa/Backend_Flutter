@@ -20,6 +20,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true}));
 
 // --- ROUTE ---
+app.get('/', (req, res)=> res.send("API Working"))
 app.use('/api/auth', authRoute);
 app.use('/api/song', songRouter);
 
