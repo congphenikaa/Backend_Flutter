@@ -16,10 +16,35 @@ const storage = new CloudinaryStorage({
   params: {
     folder: 'spotify-clone-music',
     resource_type: 'auto',
-    allowed_formats: ['mp3', 'wav', 'jpg', 'png', 'jpeg'],
   },
 });
 
-const upload = multer({ storage: storage });
+const fileFilter = (req, file, cb) => {
+  if (file.fieldname === "audio") {
+    // Chỉ cho phép file nhạc
+    if (file.mimetype === "audio/mpeg" || file.mimetype === "audio/mp3" || file.mimetype === "audio/wav") {
+      cb(null, true);
+    } else {
+      cb(new Error("Sai định dạng! Trường 'audio' chỉ chấp nhận MP3, WAV."), false);
+    }
+  } else if (file.fieldname === "image") {
+    // Chỉ cho phép file ảnh
+    if (file.mimetype === "image/png" || file.mimetype === "image/jpeg" || file.mimetype === "image/jpg") {
+      cb(null, true);
+    } else {
+      cb(new Error("Sai định dạng! Trường 'image' chỉ chấp nhận PNG, JPG."), false);
+    }
+  } else {
+    cb(new Error("Trường dữ liệu không xác định!"), false);
+  }
+};
+
+const upload = multer({ 
+  storage: storage, 
+  fileFilter: fileFilter ,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // [BẢO MẬT 2]: Giới hạn file tối đa 10MB (tránh treo server)
+  }
+});
 
 export default upload;

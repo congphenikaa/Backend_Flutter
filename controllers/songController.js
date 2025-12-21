@@ -1,87 +1,163 @@
 import Song from '../models/Songs.js';
 import {v2 as cloudinary} from 'cloudinary';
 
+// 1. THÊM BÀI HÁT
 const addSong = async (req, res) => {
     try {
-
-        const name = req.body.name;
-        const desc = req.body.desc;
+        const title = req.body.title; 
+        const description = req.body.description; 
+        const duration = req.body.duration;
         const album = req.body.album;
-        const audioFile = req.files.audio[0];
-        const imageFile = req.files.image[0];
+        const artist = req.body.artist; 
+        const category = req.body.category; 
 
-        // 1. upload file len cloudinary
-        const audioUpload = await cloudinary.uploader.upload(audioFile.path, {resource_type: "video"});
-        const imageUpload = await cloudinary.uploader.upload(imageFile.path, {resource_type: "image"});
+        const audioFile = req.files.audio ? req.files.audio[0] : null;
+        const imageFile = req.files.image ? req.files.image[0] : null;
 
-        // 2. tinh toan thoi gian (lay duration tu Cloudinary tra ve)
-        const duration = Math.floor(audioUpload.duration);
+        // Validation
+        if (!title || !description || !artist || !duration || !audioFile || !imageFile) {
+            // Rollback: Xóa file rác nếu thiếu dữ liệu text
+            if(audioFile) await cloudinary.uploader.destroy(audioFile.filename, {resource_type: 'video'});
+            if(imageFile) await cloudinary.uploader.destroy(imageFile.filename, {resource_type: 'image'});
+            
+            return res.json({ success: false, message: "Vui lòng nhập đầy đủ thông tin (Tên, Mô tả, Nghệ sĩ, File...)" });
+        }
 
-        // 3. tao data de luu vao MongoDB
         const newSong = new Song({
-            title: name,
-            description: desc,
-            audioUrl: audioUpload.secure_url,
-            imageUrl: imageUpload.secure_url,
-            duration: duration,
-            album: album !== "none" ? album : undefined
-        })
+            title,
+            description,
+            artist,
+            duration,
+            album: album && album !== "none" ? album : undefined,
+            category: category ? category : [],
+            // Lưu URL từ Cloudinary
+            imageUrl: imageFile.path, 
+            audioUrl: audioFile.path,  
+        });
 
         await newSong.save();
+        res.json({ success: true, message: "Đã thêm bài hát thành công!" });
 
-        res.json({success: true, message: "Đã thêm bài hát thành công!"});
-
-    }catch (error) {
+    } catch (error) {
         console.log(error);
-        res.json({success: false, message: "Lỗi thêm bài hát"});
+        // Rollback lỗi hệ thống
+        if (req.files) {
+            if (req.files.audio) await cloudinary.uploader.destroy(req.files.audio[0].filename, {resource_type: 'video'});
+            if (req.files.image) await cloudinary.uploader.destroy(req.files.image[0].filename, {resource_type: 'image'});
+        }
+        res.json({ success: false, message: "Lỗi hệ thống khi thêm bài hát" });
     }
 }
 
+// 2. DANH SÁCH BÀI HÁT (Có Populate)
+const listSong = async (req, res) => {
+    try {
+        // Populate giúp lấy info chi tiết của Artist, Album, Category
+        const allSongs = await Song.find({})
+            .populate("artist") 
+            .populate("album")
+            .populate("category");
+            
+        res.json({ success: true, songs: allSongs });
+    } catch (error) {
+        res.json({ success: false, message: "Lỗi lấy danh sách bài hát" });
+    }
+}
+
+// 3. XÓA BÀI HÁT
 const removeSong = async (req, res) => {
     try {
-
-        // 1. Tìm bài hát trong db
         const song = await Song.findById(req.body.id);
-
-        if(!song) {
-            return res.json({sucess: flase, message: "Không tìm thấy bài hát"});
+        if (!song) {
+            return res.json({ success: false, message: "Không tìm thấy bài hát" });
         }
 
-        // 2. Xóa bài hát trên Cloudinary
-        // Logic: lấy public_id từ URL.,
-        // URL mẫu: https://res.cloudinary.com/.../upload/v1234/spotify/ten-anh
-        // Ta cần lấy đoạn: "spotify/ten-anh"
+        // Hàm tiện ích lấy public_id từ URL Cloudinary
+        // URL ví dụ: .../upload/v1234/folder/filename.jpg -> folder/filename
+        const getPublicId = (url) => {
+            if (!url) return null;
+            const segments = url.split('/');
+            // Lấy 2 phần cuối (folder/filename.ext)
+            const lastPart = segments.pop(); // filename.ext
+            const folderPart = segments.pop(); // folder
+            const filename = lastPart.split('.')[0];
+            return `${folderPart}/${filename}`;
+        };
 
-        if(song.imageUrl) {
-            const imagePublicId = song.imageUrl.split('/').slice(-2).join('/').split('.')[0];
-            await cloudinary.uploader.destroy(imagePublicId, {resource_type: "image"});
-        } 
+        // Xóa ảnh cũ
+        if (song.imageUrl) {
+            try {
+                // Cách xóa đơn giản nếu bạn không chắc về cấu trúc folder
+                // Nếu bạn dùng Multer-Storage-Cloudinary, req.file.filename chính là public_id chuẩn nhất
+                // Nhưng ở đây ta lấy từ DB url nên cần parse
+                const imagePublicId = getPublicId(song.imageUrl); 
+                await cloudinary.uploader.destroy(imagePublicId, { resource_type: "image" });
+            } catch (err) { console.log("Lỗi xóa ảnh cũ:", err); }
+        }
 
-        // 3. Xóa nhạc trên cloudinary
-        if(song.audioUrl) {
-            const audioPublicId = song.audioUrl.split('/').slice(-2).join('/').split('.')[0];
-            await cloudinary.uploader.destroy(audioPublicId, {resource_type: "video"});
+        // Xóa nhạc cũ
+        if (song.audioUrl) {
+            try {
+                const audioPublicId = getPublicId(song.audioUrl);
+                await cloudinary.uploader.destroy(audioPublicId, { resource_type: "video" });
+            } catch (err) { console.log("Lỗi xóa nhạc cũ:", err); }
         }
 
         await Song.findByIdAndDelete(req.body.id);
+        res.json({ success: true, message: "Đã xóa bài hát thành công" });
 
-        res.json({success: true, message: "Đã xóa bài hát thành công"});
-
-    }catch (error) {
+    } catch (error) {
         console.log(error);
-        res.json({success: false, message: "Lỗi xóa bài hát"});
+        res.json({ success: false, message: "Lỗi xóa bài hát" });
     }
 }
 
-const listSong = async (req, res) => {
+// 4. CẬP NHẬT BÀI HÁT (UPDATE)
+const updateSong = async (req, res) => {
     try {
+        const { id, title, description, artist, album, category, duration } = req.body;
+        
+        const song = await Song.findById(id);
+        if (!song) return res.json({ success: false, message: "Không tìm thấy bài hát" });
 
-        const allSongs = await Song.find({});
-        res.json({success: true, songs: allSongs });
+        // Cập nhật Metadata
+        song.title = title;
+        song.description = description;
+        song.artist = artist;
+        song.album = album && album !== "none" ? album : null;
+        song.category = category ? category : song.category;
+        if (duration) song.duration = duration;
 
-    }catch (error) {
-        res.json({success:false, message: "Lỗi lấy danh sách bài hát"});
+        // Xử lý File Ảnh mới (nếu có)
+        if (req.files && req.files.image) {
+            // 1. Xóa ảnh cũ
+            if (song.imageUrl) {
+                const oldImgId = song.imageUrl.split('/').pop().split('.')[0]; 
+                await cloudinary.uploader.destroy(oldImgId); 
+                // Lưu ý: Nếu có folder, dùng logic getPublicId như hàm removeSong
+            }
+            // 2. Gán ảnh mới
+            song.imageUrl = req.files.image[0].path;
+        }
+
+        // Xử lý File Nhạc mới (nếu có)
+        if (req.files && req.files.audio) {
+            // 1. Xóa nhạc cũ
+            if (song.audioUrl) {
+                const oldAudioId = song.audioUrl.split('/').pop().split('.')[0];
+                await cloudinary.uploader.destroy(oldAudioId, { resource_type: "video" });
+            }
+            // 2. Gán nhạc mới
+            song.audioUrl = req.files.audio[0].path;
+        }
+
+        await song.save();
+        res.json({ success: true, message: "Cập nhật bài hát thành công" });
+
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Lỗi khi cập nhật bài hát" });
     }
 }
 
-export { addSong, listSong , removeSong};
+export { addSong, listSong, removeSong, updateSong };

@@ -4,6 +4,9 @@ import cors from 'cors';
 import connectDB from './configs/db.js'; 
 import authRoute from './routes/authRoute.js';
 import songRouter from './routes/songRoute.js';
+import artistRouter from './routes/artistRoute.js';
+import albumRouter from './routes/albumRoute.js';
+import categoryRouter from './routes/categoryRoute.js';
 
 // 1. Cấu hình biến môi trường
 dotenv.config();
@@ -23,6 +26,9 @@ app.use(express.urlencoded({ extended: true}));
 app.get('/', (req, res)=> res.send("API Working"))
 app.use('/api/auth', authRoute);
 app.use('/api/song', songRouter);
+app.use('/api/artist', artistRouter);
+app.use("/api/album", albumRouter);
+app.use("/api/category", categoryRouter);
 
 // Khởi chạy server
 const PORT = process.env.PORT || 5000;

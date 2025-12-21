@@ -3,12 +3,12 @@ import mongoose from 'mongoose';
 const songSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: { type: String, required: true },
-    audioUrl: { type: String, required: true }, // Link mp3 Cloudinary
-    imageUrl: { type: String, required: true }, // Ảnh bìa
-    duration: { type: Number, required: true }, // Giây
+    audioUrl: { type: String, required: true }, 
+    imageUrl: { type: String, required: true }, 
+    duration: { type: Number, required: true }, 
     
     // Quan hệ
-    artist: { type: mongoose.Schema.Types.ObjectId, ref: 'Artist'},
+    artist: { type: mongoose.Schema.Types.ObjectId, ref: 'Artist', required: true },
     album: { type: mongoose.Schema.Types.ObjectId, ref: 'Album' }, 
     category: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
     
