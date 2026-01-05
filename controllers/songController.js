@@ -160,4 +160,43 @@ const updateSong = async (req, res) => {
     }
 }
 
-export { addSong, listSong, removeSong, updateSong };
+const listSongByCategory = async (req, res) => {
+    try {
+        const { id } = req.params; // Lấy ID từ URL
+        const songs = await Song.find({ category: id });
+        res.json({ success: true, songs: songs });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Error fetching songs by category" });
+    }
+}
+
+// 1. [MỚI] LẤY BÀI HÁT THEO ALBUM ID
+const listSongByAlbum = async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Tìm bài hát có field 'album' trùng với id gửi lên
+        const songs = await Song.find({ album: id });
+        res.json({ success: true, songs: songs });
+    } catch (error) {
+        res.json({ success: false, message: "Error" });
+    }
+}
+
+// 2. [MỚI] TÌM KIẾM BÀI HÁT
+const searchSong = async (req, res) => {
+    try {
+        const { query } = req.query; // Lấy từ URL: ?query=tenbaihat
+        
+        // Dùng Regex để tìm gần đúng (không phân biệt hoa thường 'i')
+        const songs = await Song.find({
+            name: { $regex: query, $options: 'i' }
+        });
+
+        res.json({ success: true, songs: songs });
+    } catch (error) {
+        res.json({ success: false, message: "Error" });
+    }
+}
+
+export { addSong, listSong, removeSong, updateSong, listSongByCategory, listSongByAlbum, searchSong };

@@ -7,6 +7,7 @@ import songRouter from './routes/songRoute.js';
 import artistRouter from './routes/artistRoute.js';
 import albumRouter from './routes/albumRoute.js';
 import categoryRouter from './routes/categoryRoute.js';
+import playlistRouter from './routes/playlistRoute.js';
 
 // 1. Cấu hình biến môi trường
 dotenv.config();
@@ -29,6 +30,7 @@ app.use('/api/song', songRouter);
 app.use('/api/artist', artistRouter);
 app.use("/api/album", albumRouter);
 app.use("/api/category", categoryRouter);
+app.use('/api/playlist', playlistRouter);
 
 // Khởi chạy server
 const PORT = process.env.PORT || 5000;
