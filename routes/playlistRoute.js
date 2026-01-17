@@ -5,6 +5,7 @@ import {
     addSongToPlaylist, 
     removePlaylist,
     getPlaylistById,
+    removeSongFromPlaylist,
 } from '../controllers/playlistController.js';
 import upload from '../configs/cloudinaryConfig.js';
 
@@ -16,5 +17,5 @@ playlistRouter.post('/add-song', addSongToPlaylist);
 playlistRouter.post('/remove', removePlaylist);
 playlistRouter.get('/detail/:id', getPlaylistById);
 
-
+playlistRouter.post('/remove-song', removeSongFromPlaylist);
 export default playlistRouter;

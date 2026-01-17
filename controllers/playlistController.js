@@ -110,10 +110,28 @@ const getPlaylistById = async (req, res) => {
     }
 }
 
+// 6. Xóa bài hát khỏi Playlist
+const removeSongFromPlaylist = async (req, res) => {
+    try {
+        const { playlistId, songId } = req.body;
+        
+        // Sử dụng $pull để xóa songId khỏi mảng songs
+        await Playlist.findByIdAndUpdate(playlistId, {
+            $pull: { songs: songId }
+        });
+
+        res.json({ success: true, message: "Song removed from playlist" });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Error removing song" });
+    }
+}
+
 export { 
     createPlaylist, 
     getUserPlaylists, 
     addSongToPlaylist, 
     removePlaylist,
     getPlaylistById,
+    removeSongFromPlaylist,
 };
