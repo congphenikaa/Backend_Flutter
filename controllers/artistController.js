@@ -1,4 +1,6 @@
 import Artist from '../models/Artist.js';
+import Album from '../models/Album.js';
+import Song from '../models/Songs.js';
 import {v2 as cloudinary} from 'cloudinary';
 
 const addArtist = async (req, res) => {
@@ -119,4 +121,36 @@ const removeArtist = async (req, res) => {
     }
 }
 
-export { addArtist, listArtist, removeArtist, updateArtist};
+// Lấy chi tiết Artist bao gồm Bài hát và Album ---
+const getArtistDetail = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // 1. Lấy thông tin Artist
+        const artist = await Artist.findById(id);
+        if (!artist) {
+            return res.json({ success: false, message: "Artist not found" });
+        }
+
+        // 2. Lấy danh sách Album của Artist này
+        const albums = await Album.find({ artist: id }).sort({ releaseDate: -1 });
+
+        // 3. Lấy Top bài hát (ví dụ top 10 bài nhiều lượt nghe nhất)
+        const topSongs = await Song.find({ artist: id })
+            .sort({ plays: -1 })
+            .limit(10);
+
+        res.json({ 
+            success: true, 
+            artist, 
+            albums, 
+            topSongs 
+        });
+
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Error fetching artist details" });
+    }
+}
+
+export { addArtist, listArtist, removeArtist, updateArtist, getArtistDetail};

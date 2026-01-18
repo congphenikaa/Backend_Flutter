@@ -1,4 +1,6 @@
 import Song from '../models/Songs.js';
+import Album from '../models/Album.js';
+import Artist from '../models/Artist.js';
 import {v2 as cloudinary} from 'cloudinary';
 
 // 1. THÊM BÀI HÁT
@@ -163,7 +165,8 @@ const updateSong = async (req, res) => {
 const listSongByCategory = async (req, res) => {
     try {
         const { id } = req.params; // Lấy ID từ URL
-        const songs = await Song.find({ category: id });
+        const songs = await Song.find({ category: id })
+            .populate("artist");
         res.json({ success: true, songs: songs });
     } catch (error) {
         console.log(error);
@@ -171,7 +174,7 @@ const listSongByCategory = async (req, res) => {
     }
 }
 
-// 1. [MỚI] LẤY BÀI HÁT THEO ALBUM ID
+// 1. LẤY BÀI HÁT THEO ALBUM ID
 const listSongByAlbum = async (req, res) => {
     try {
         const { id } = req.params;
@@ -183,20 +186,35 @@ const listSongByAlbum = async (req, res) => {
     }
 }
 
-// 2. [MỚI] TÌM KIẾM BÀI HÁT
-const searchSong = async (req, res) => {
+// --- TÌM KIẾM TOÀN BỘ (GLOBAL SEARCH) ---
+const searchGlobal = async (req, res) => {
     try {
-        const { query } = req.query; // Lấy từ URL: ?query=tenbaihat
+        const { query } = req.query; // Lấy từ URL: ?query=abc
         
-        // Dùng Regex để tìm gần đúng (không phân biệt hoa thường 'i')
-        const songs = await Song.find({
-            name: { $regex: query, $options: 'i' }
-        });
+        if (!query) {
+            return res.json({ success: true, songs: [], artists: [], albums: [] });
+        }
 
-        res.json({ success: true, songs: songs });
+        // Tìm Song
+        const songs = await Song.find({
+            title: { $regex: query, $options: 'i' }
+        }).populate("artist").limit(5); // Chỉ lấy 5 bài
+
+        // Tìm Artist
+        const artists = await Artist.find({
+            name: { $regex: query, $options: 'i' }
+        }).limit(3);
+
+        // Tìm Album
+        const albums = await Album.find({
+            title: { $regex: query, $options: 'i' }
+        }).populate("artist").limit(3);
+
+        res.json({ success: true, songs, artists, albums });
     } catch (error) {
-        res.json({ success: false, message: "Error" });
+        console.log(error);
+        res.json({ success: false, message: "Search Error" });
     }
 }
 
-export { addSong, listSong, removeSong, updateSong, listSongByCategory, listSongByAlbum, searchSong };
+export { addSong, listSong, removeSong, updateSong, listSongByCategory, listSongByAlbum, searchGlobal };

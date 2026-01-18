@@ -1,5 +1,5 @@
 import express from 'express';
-import { addArtist, listArtist, removeArtist, updateArtist } from '../controllers/artistController.js';
+import { addArtist, listArtist, removeArtist, updateArtist, getArtistDetail } from '../controllers/artistController.js';
 import upload from '../configs/cloudinaryConfig.js';
 
 const artistRouter = express.Router();
@@ -15,5 +15,8 @@ artistRouter.post('/remove', removeArtist);
 
 // Route sửa
 artistRouter.post('/update', upload.single('image'), updateArtist);
+
+// Route lấy chi tiết nghệ sĩ
+artistRouter.get('/detail/:id', getArtistDetail);
 
 export default artistRouter;
