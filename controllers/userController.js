@@ -100,7 +100,11 @@ const toggleFollowArtist = async (req, res) => {
       .select("likedSongs")
       .populate({
         path: "likedSongs",
-        select: "title artist imageUrl audioUrl duration", // Chỉ lấy các trường cần thiết
+        // Populate lồng nhau: Vào trong likedSongs -> vào tiếp artist để lấy name
+        populate: {
+          path: "artist",
+          select: "name imageUrl" // Lấy tên và ảnh của ca sĩ
+        }
       });
 
     if (!user) {

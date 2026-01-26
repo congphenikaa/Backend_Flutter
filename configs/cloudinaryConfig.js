@@ -20,19 +20,29 @@ const storage = new CloudinaryStorage({
 });
 
 const fileFilter = (req, file, cb) => {
+  // Danh sách mime types cho phép (Mở rộng thêm)
+  const allowedAudioTypes = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-m4a", "audio/ogg"];
+  const allowedImageTypes = [
+    "image/png", 
+    "image/jpeg", 
+    "image/jpg", 
+    "image/webp", 
+    "image/gif", 
+    "image/heic", 
+    "image/heif"
+  ];
+
   if (file.fieldname === "audio") {
-    // Chỉ cho phép file nhạc
-    if (file.mimetype === "audio/mpeg" || file.mimetype === "audio/mp3" || file.mimetype === "audio/wav") {
+    if (allowedAudioTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Sai định dạng! Trường 'audio' chỉ chấp nhận MP3, WAV."), false);
+      cb(new Error(`Sai định dạng Audio! Chỉ chấp nhận: ${allowedAudioTypes.join(", ")}`), false);
     }
-  } else if (file.fieldname === "image") {
-    // Chỉ cho phép file ảnh
-    if (file.mimetype === "image/png" || file.mimetype === "image/jpeg" || file.mimetype === "image/jpg") {
+  } else if (file.fieldname === "image") {s
+    if (allowedImageTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Sai định dạng! Trường 'image' chỉ chấp nhận PNG, JPG."), false);
+      cb(new Error(`Sai định dạng Ảnh! Chỉ chấp nhận: JPG, PNG, WEBP, HEIC...`), false);
     }
   } else {
     cb(new Error("Trường dữ liệu không xác định!"), false);
@@ -43,7 +53,7 @@ const upload = multer({
   storage: storage, 
   fileFilter: fileFilter ,
   limits: {
-    fileSize: 10 * 1024 * 1024 // [BẢO MẬT 2]: Giới hạn file tối đa 10MB (tránh treo server)
+    fileSize: 10 * 1024 * 1024 // 10MB
   }
 });
 
