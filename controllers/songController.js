@@ -1,6 +1,7 @@
 import Song from '../models/Songs.js';
 import Album from '../models/Album.js';
 import Artist from '../models/Artist.js';
+import Fuse from 'fuse.js';
 import {v2 as cloudinary} from 'cloudinary';
 
 // 1. THÊM BÀI HÁT
@@ -186,35 +187,86 @@ const listSongByAlbum = async (req, res) => {
     }
 }
 
-// --- TÌM KIẾM TOÀN BỘ (GLOBAL SEARCH) ---
+// --- THUẬT TOÁN TÌM KIẾM (FUZZY SEARCH) ---
 const searchGlobal = async (req, res) => {
     try {
-        const { query } = req.query; // Lấy từ URL: ?query=abc
+        const { query } = req.query; 
         
-        if (!query) {
+        // 1. Kiểm tra đầu vào
+        if (!query || query.trim().length === 0) {
             return res.json({ success: true, songs: [], artists: [], albums: [] });
         }
 
-        // Tìm Song
-        const songs = await Song.find({
-            title: { $regex: query, $options: 'i' }
-        }).populate("artist").limit(5); // Chỉ lấy 5 bài
+        // 2. Lấy dữ liệu thô từ Database (Chỉ lấy các trường cần thiết để tối ưu RAM)
+        // Dùng Promise.all để chạy song song 3 câu lệnh query
+        const [allSongs, allArtists, allAlbums] = await Promise.all([
+            Song.find({}).populate('artist').populate('album'),
+            Artist.find({}),
+            Album.find({}).populate('artist')
+        ]);
 
-        // Tìm Artist
-        const artists = await Artist.find({
-            name: { $regex: query, $options: 'i' }
-        }).limit(3);
+        // 3. Cấu hình thuật toán Fuse.js
+        // threshold: 0.0 (chính xác tuyệt đối) -> 1.0 (chấp nhận tất cả). 0.4 là mức lý tưởng cho việc gõ sai nhẹ.
+        const options = {
+            includeScore: true,
+            threshold: 0.4, 
+            ignoreLocation: true, // Tìm thấy ở bất kỳ vị trí nào trong chuỗi
+            useExtendedSearch: true
+        };
 
-        // Tìm Album
-        const albums = await Album.find({
-            title: { $regex: query, $options: 'i' }
-        }).populate("artist").limit(3);
+        // --- A. TÌM BÀI HÁT ---
+        // Logic: Ưu tiên tìm trong 'title' (trọng số cao), sau đó tìm trong 'artist.name'
+        const songFuse = new Fuse(allSongs, {
+            ...options,
+            keys: [
+                { name: 'title', weight: 0.6 },        // Tên bài hát quan trọng nhất
+                { name: 'artist.name', weight: 0.4 }   // Tên ca sĩ cũng quan trọng
+            ]
+        });
+        const songResults = songFuse.search(query).map(res => res.item).slice(0, 10); // Lấy 10 kết quả
 
-        res.json({ success: true, songs, artists, albums });
+        // --- B. TÌM NGHỆ SĨ ---
+        const artistFuse = new Fuse(allArtists, {
+            ...options,
+            keys: ['name']
+        });
+        const artistResults = artistFuse.search(query).map(res => res.item).slice(0, 5);
+
+        // --- C. TÌM ALBUM ---
+        const albumFuse = new Fuse(allAlbums, {
+            ...options,
+            keys: ['title', 'artist.name']
+        });
+        const albumResults = albumFuse.search(query).map(res => res.item).slice(0, 5);
+
+        // 4. Trả kết quả về cho Flutter
+        res.json({ 
+            success: true, 
+            songs: songResults, 
+            artists: artistResults, 
+            albums: albumResults 
+        });
+
     } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: "Search Error" });
+        console.error("Search Error:", error);
+        res.json({ success: false, message: "Lỗi tìm kiếm server" });
     }
 }
 
-export { addSong, listSong, removeSong, updateSong, listSongByCategory, listSongByAlbum, searchGlobal };
+// --- TĂNG LƯỢT NGHE (Plays) ---
+const incrementPlays = async (req, res) => {
+    try {
+        const { id } = req.body; // Nhận ID bài hát từ body
+
+        // Sử dụng $inc để tăng 1 đơn vị, đảm bảo an toàn khi nhiều user gọi cùng lúc
+        await Song.findByIdAndUpdate(id, { $inc: { plays: 1 } });
+
+        res.json({ success: true, message: "Plays incremented" });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Error incrementing plays" });
+    }
+}
+
+export { addSong, listSong, removeSong, updateSong, 
+    listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays };

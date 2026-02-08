@@ -1,7 +1,6 @@
 import express from 'express';
-import { addSong, 
-    listSong, removeSong, updateSong, listSongByCategory, 
-    listSongByAlbum , searchGlobal} from '../controllers/songController.js';
+import { addSong, listSong, removeSong, updateSong, listSongByCategory, 
+    listSongByAlbum , searchGlobal, incrementPlays} from '../controllers/songController.js';
 import upload from '../configs/cloudinaryConfig.js';
 
 const songRouter = express.Router();
@@ -29,4 +28,6 @@ songRouter.get('/category/:id', listSongByCategory);
 songRouter.get('/album/:id', listSongByAlbum);
 
 songRouter.get('/search', searchGlobal);
+
+songRouter.post('/play', incrementPlays);
 export default songRouter;
