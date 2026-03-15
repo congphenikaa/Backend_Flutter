@@ -3,6 +3,9 @@ import Album from '../models/Album.js';
 import Artist from '../models/Artist.js';
 import Fuse from 'fuse.js';
 import {v2 as cloudinary} from 'cloudinary';
+import redisClient from '../configs/redisConfig.js';
+import { playCountQueue } from '../configs/queueConfig.js';
+
 
 // 1. THÊM BÀI HÁT
 const addSong = async (req, res) => {
@@ -256,17 +259,24 @@ const searchGlobal = async (req, res) => {
 // --- TĂNG LƯỢT NGHE (Plays) ---
 const incrementPlays = async (req, res) => {
     try {
-        const { id } = req.body; // Nhận ID bài hát từ body
+        const { id } = req.body; 
 
-        // Sử dụng $inc để tăng 1 đơn vị, đảm bảo an toàn khi nhiều user gọi cùng lúc
-        await Song.findByIdAndUpdate(id, { $inc: { plays: 1 } });
+        if (!id) {
+            return res.json({ success: false, message: "Thiếu ID bài hát" });
+        }
 
-        res.json({ success: true, message: "Plays incremented" });
+        // 2. CHỈ CẦN NÉM VÀO QUEUE
+        // Ném việc cập nhật vào Queue, đặt tên công việc là 'increment-job'
+        await playCountQueue.add('increment-job', { songId: id });
+
+        // 3. TRẢ KẾT QUẢ NGAY LẬP TỨC CHO FLUTTER (< 5ms)
+        res.json({ success: true, message: "Đã đưa vào hàng đợi xử lý" });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: "Error incrementing plays" });
+        res.json({ success: false, message: "Lỗi hệ thống Queue" });
     }
 }
+
 
 export { addSong, listSong, removeSong, updateSong, 
     listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays };
