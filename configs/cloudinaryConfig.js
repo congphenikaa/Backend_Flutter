@@ -38,7 +38,7 @@ const fileFilter = (req, file, cb) => {
     } else {
       cb(new Error(`Sai định dạng Audio! Chỉ chấp nhận: ${allowedAudioTypes.join(", ")}`), false);
     }
-  } else if (file.fieldname === "image") {s
+  } else if (file.fieldname === "image") {
     if (allowedImageTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
