@@ -3,7 +3,7 @@ import { connection } from '../configs/queueConfig.js';
 import Song from '../models/Songs.js';
 import redisClient from '../configs/redisConfig.js';
 
-console.log("👷 [Worker] Nhân viên đếm lượt nghe đang chạy ngầm...");
+console.log("[Worker] Nhân viên đếm lượt nghe đang chạy ngầm...");
 
 // Khởi tạo Worker giám sát 'play-count-queue'
 const worker = new Worker('play-count-queue', async (job) => {
@@ -31,16 +31,16 @@ const worker = new Worker('play-count-queue', async (job) => {
                 value: songId
             });
             
-            console.log(`✅ [Worker] Đã xử lý thành công +1 view cho: ${updatedSong.title}`);
+            console.log(` [Worker] Đã xử lý thành công +1 view cho: ${updatedSong.title}`);
         }
     } catch (error) {
-        console.error(`❌ [Worker] Lỗi xử lý bài hát ${songId}:`, error);
+        console.error(`[Worker] Lỗi xử lý bài hát ${songId}:`, error);
     }
 }, { connection });
 
 // Bắt lỗi rớt mạng của Worker
 worker.on('error', err => {
-    console.error('❌ [Worker] Sập nguồn:', err);
+    console.error(' [Worker] Sập nguồn:', err);
 });
 
 export default worker;

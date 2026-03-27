@@ -11,6 +11,7 @@ import playlistRouter from './routes/playlistRoute.js';
 import userRoutes from "./routes/userRoute.js";
 import chartRoute from './routes/chartRoute.js';
 import './workers/playCountWorker.js';
+import './cronjobs/trendingDecay.js';
 
 // 1. Cấu hình biến môi trường
 dotenv.config();

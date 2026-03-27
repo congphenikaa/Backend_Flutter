@@ -8,8 +8,8 @@ const connection = new IORedis(process.env.REDIS_URL, {
     maxRetriesPerRequest: null // Bắt buộc đối với BullMQ
 });
 
-connection.on('error', (err) => console.log('❌ [Queue Redis] Error:', err));
-connection.on('ready', () => console.log('✅ [Queue Redis] Kết nối thành công!'));
+connection.on('error', (err) => console.log(' [Queue Redis] Error:', err));
+connection.on('ready', () => console.log(' [Queue Redis] Kết nối thành công!'));
 
 // Tạo một cái Hàng đợi (Queue) có tên là 'play-count-queue'
 export const playCountQueue = new Queue('play-count-queue', { connection });

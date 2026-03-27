@@ -259,24 +259,39 @@ const searchGlobal = async (req, res) => {
 // --- TĂNG LƯỢT NGHE (Plays) ---
 const incrementPlays = async (req, res) => {
     try {
-        const { id } = req.body; 
+        const { id, userId } = req.body; 
 
         if (!id) {
             return res.json({ success: false, message: "Thiếu ID bài hát" });
         }
 
-        // 2. CHỈ CẦN NÉM VÀO QUEUE
-        // Ném việc cập nhật vào Queue, đặt tên công việc là 'increment-job'
+        // --- BƯỚC 1: KIỂM TRA COOLDOWN BẰNG REDIS (CHỐNG RACE CONDITION) ---
+        const cooldownKey = `cooldown:view:${userId}:${id}`;
+        
+        // CỰC KỲ QUAN TRỌNG: Sử dụng SET với NX (Not Exists) tạo Atomic Lock
+        // Nó đảm bảo dù có 1000 request tới cùng 1 mili-giây, chỉ đúng 1 request được trả về "OK"
+        const acquiredLock = await redisClient.set(cooldownKey, "locked", {
+            EX: 180, // Khóa 3 phút (180 giây)
+            NX: true // Chỉ set nếu key CHƯA tồn tại
+        });
+        
+        // Nếu acquiredLock là null -> Key ĐÃ tồn tại (hoặc có 1 request khác vừa nhanh tay tạo trước đó 0.001s)
+        if (!acquiredLock) {
+            console.log(`[Anti-Spam] Chặn spam view từ User: ${userId} cho bài hát: ${id}`);
+            // Trả về true để app Flutter không báo lỗi, nhưng Worker sẽ KHÔNG chạy
+            return res.json({ success: true, message: "Đã ghi nhận (Bỏ qua do đang trong thời gian chờ 15 phút)" });
+        }
+
+        // --- BƯỚC 2: NẾU HỢP LỆ, NÉM VÀO QUEUE ĐỂ WORKER LÀM VIỆC ---
         await playCountQueue.add('increment-job', { songId: id });
 
-        // 3. TRẢ KẾT QUẢ NGAY LẬP TỨC CHO FLUTTER (< 5ms)
-        res.json({ success: true, message: "Đã đưa vào hàng đợi xử lý" });
+        res.json({ success: true, message: "Đã cộng lượt nghe hợp lệ" });
     } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: "Lỗi hệ thống Queue" });
+        console.error("Lỗi incrementPlays:", error);
+        // Trả về mã lỗi HTTP 500 chuẩn
+        res.status(500).json({ success: false, message: "Lỗi hệ thống Queue" });
     }
 }
-
 
 export { addSong, listSong, removeSong, updateSong, 
     listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays };
