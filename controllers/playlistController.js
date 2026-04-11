@@ -127,6 +127,30 @@ const removeSongFromPlaylist = async (req, res) => {
     }
 }
 
+// 7. Cập nhật Playlist (Sửa tên, mô tả, ảnh)
+const updatePlaylist = async (req, res) => {
+    try {
+        const { playlistId, name, desc } = req.body;
+        
+        let updateData = { name, description: desc };
+
+        // Nếu người dùng chọn ảnh mới, upload lên Cloudinary
+        if (req.file) {
+            const imageUpload = await cloudinary.uploader.upload(req.file.path, { 
+                resource_type: "image",
+                folder: "music_app_playlists"
+            });
+            updateData.image = imageUpload.secure_url;
+        }
+
+        const updatedPlaylist = await Playlist.findByIdAndUpdate(playlistId, updateData, { new: true });
+        res.json({ success: true, message: "Playlist updated successfully", playlist: updatedPlaylist });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: "Error updating playlist" });
+    }
+}
+
 export { 
     createPlaylist, 
     getUserPlaylists, 
@@ -134,4 +158,5 @@ export {
     removePlaylist,
     getPlaylistById,
     removeSongFromPlaylist,
+    updatePlaylist
 };

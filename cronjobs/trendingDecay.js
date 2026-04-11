@@ -6,7 +6,7 @@ console.log(" [CronJob] Tiến trình kiểm tra rớt hạng Trending đã sẵ
 
 // Cài đặt chạy tự động mỗi 30 phút (Cú pháp: '*/30 * * * *')
 // Để test thử nhanh, bạn có thể đổi thành '*/1 * * * *' (Mỗi 1 phút)
-cron.schedule('*/1 * * * *', async () => {
+cron.schedule('*/30 * * * *', async () => {
     try {
         if (!redisClient.isReady) return;
 

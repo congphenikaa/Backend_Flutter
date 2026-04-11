@@ -12,12 +12,12 @@ const chartController = {
             if (redisClient.isReady) {
                 const cachedData = await redisClient.get(cacheKey);
                 if (cachedData) {
-                    console.log("🔥 [CACHE HIT] Lấy Trending siêu tốc");
+                    console.log("[CACHE HIT] Lấy Trending siêu tốc");
                     return res.status(200).json({ success: true, data: JSON.parse(cachedData) });
                 }
             }
 
-            console.log("🐢 [CACHE MISS] Tính toán Trending từ MongoDB...");
+            console.log("[CACHE MISS] Tính toán Trending từ MongoDB...");
 
             const topData = await redisClient.zRangeWithScores(chartKey, 0, 19, { REV: true });
 
