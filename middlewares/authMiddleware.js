@@ -32,3 +32,15 @@ export const adminOnly = (req, res, next) => {
         res.status(403).json({message: 'Truy cập bị từ chối! chỉ dành cho admin'});
     }
 }
+
+export const restrictTo = (...roles) => {
+    return (req, res, next) => {
+        if (!req.user || !roles.includes(req.user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "Truy cập bị từ chối! Bạn không có quyền thực hiện hành động này."
+            });
+        }
+        next();
+    };
+};

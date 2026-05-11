@@ -11,6 +11,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_SECRET_KEY
 });
 
+// 1. DÀNH CHO UPLOAD TRỰC TIẾP (Avatar, Category Image,...)
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -20,41 +21,34 @@ const storage = new CloudinaryStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  // Danh sách mime types cho phép (Mở rộng thêm)
   const allowedAudioTypes = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-m4a", "audio/ogg"];
   const allowedImageTypes = [
-    "image/png", 
-    "image/jpeg", 
-    "image/jpg", 
-    "image/webp", 
-    "image/gif", 
-    "image/heic", 
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+    "image/heic",
     "image/heif"
   ];
 
   if (file.fieldname === "audio") {
-    if (allowedAudioTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Sai định dạng Audio! Chỉ chấp nhận: ${allowedAudioTypes.join(", ")}`), false);
-    }
+    if (allowedAudioTypes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error(`Sai định dạng Audio! Chỉ chấp nhận: ${allowedAudioTypes.join(", ")}`), false);
   } else if (file.fieldname === "image") {
-    if (allowedImageTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Sai định dạng Ảnh! Chỉ chấp nhận: JPG, PNG, WEBP, HEIC...`), false);
-    }
+    if (allowedImageTypes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Sai định dạng Ảnh! Chỉ chấp nhận: JPG, PNG, WEBP, HEIC..."), false);
   } else {
     cb(new Error("Trường dữ liệu không xác định!"), false);
   }
 };
 
-const upload = multer({ 
-  storage: storage, 
+const upload = multer({
+  storage: storage,
   fileFilter: fileFilter ,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB
-  }
+  limits: { fileSize: 15 * 1024 * 1024 }
 });
 
+// EXPORT CẢ 2: upload (cho middleware cũ) và cloudinary (cho upload thủ công qua RAM)
+export { upload, cloudinary };
 export default upload;

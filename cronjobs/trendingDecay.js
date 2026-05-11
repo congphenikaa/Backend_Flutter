@@ -2,39 +2,35 @@ import cron from 'node-cron';
 import redisClient from '../configs/redisConfig.js';
 import Song from '../models/Songs.js';
 
-console.log(" [CronJob] Tiến trình kiểm tra rớt hạng Trending đã sẵn sàng...");
+console.log(" [CronJob] Các tiến trình quản lý Trending đã sẵn sàng...");
 
-// Cài đặt chạy tự động mỗi 30 phút (Cú pháp: '*/30 * * * *')
-// Để test thử nhanh, bạn có thể đổi thành '*/1 * * * *' (Mỗi 1 phút)
+// ============================================================================
+// CRONJOB 1: CẬP NHẬT RỚT HẠNG THEO THỜI GIAN (Chạy mỗi 30 phút)
+// Mục đích: Ép các bài Top trending bị trừ điểm nếu thời gian trôi qua
+// ============================================================================
 cron.schedule('*/30 * * * *', async () => {
     try {
         if (!redisClient.isReady) return;
 
-        // TỐI ƯU 1: Chỉ lấy Top 100 bài hát cao điểm nhất từ Redis
+        // Chỉ lấy Top 100 bài hát cao điểm nhất từ Redis
         const top100Ids = await redisClient.zRange('chart:trending', 0, 99, { REV: true });
         
         if (top100Ids.length === 0) return;
 
-        // TỐI ƯU 2: Truy vấn MongoDB siêu nhẹ (Chỉ lấy plays và createdAt)
-        // Dùng .select() để loại bỏ các trường nặng như ảnh, audio, mô tả...
+        // Truy vấn MongoDB siêu nhẹ
         const songs = await Song.find({ _id: { $in: top100Ids } }).select('plays createdAt');
 
-        // TỐI ƯU 3: Sử dụng Redis Pipeline (Gom lệnh)
-        // Thay vì gửi 100 request tới Redis, ta gom lại thành 1 gói duy nhất
+        // Sử dụng Redis Pipeline (Gom lệnh)
         const pipeline = redisClient.multi();
-
         let updatedCount = 0;
 
         for (const song of songs) {
-            // Tính toán lại tuổi đời tính đến thời điểm HIỆN TẠI
             const ageInMs = new Date() - new Date(song.createdAt);
             const ageInHours = ageInMs / (1000 * 60 * 60);
             
-            // Công thức Time Decay (Gravity = 1.5)
             const gravity = 1.5;
             const newTrendingScore = song.plays / Math.pow(ageInHours + 2, gravity);
 
-            // Đưa lệnh update vào Pipeline
             pipeline.zAdd('chart:trending', {
                 score: newTrendingScore,
                 value: song._id.toString()
@@ -43,12 +39,35 @@ cron.schedule('*/30 * * * *', async () => {
             updatedCount++;
         }
 
-        // Thực thi toàn bộ pipeline cùng 1 lúc
         await pipeline.exec();
-        
-        console.log(` [CronJob] Đã tính toán và cập nhật rớt hạng cho ${updatedCount} bài hát trong Top 100.`);
+        console.log(` [CronJob - 30m] Đã cập nhật rớt hạng cho ${updatedCount} bài hát trong Top 100.`);
 
     } catch (error) {
-        console.error(" [CronJob] Lỗi cập nhật rớt hạng Trending:", error);
+        console.error(" [CronJob - 30m] Lỗi cập nhật rớt hạng Trending:", error);
+    }
+});
+
+// ============================================================================
+// CRONJOB 2: DỌN DẸP RÁC REDIS (Chạy 1 lần/ngày vào lúc 03:00 sáng)
+// Cú pháp: '0 3 * * *' (Phút 0, Giờ 3, mọi ngày, mọi tháng, mọi thứ)
+// Mục đích: Xóa các bài hát rớt hạng quá sâu để giải phóng RAM cho Redis
+// ============================================================================
+cron.schedule('0 3 * * *', async () => {
+    try {
+        if (!redisClient.isReady) return;
+
+        console.log(" [CronJob - Daily] Bắt đầu dọn dẹp rác Redis...");
+
+        // Xóa tất cả các phần tử, NGOẠI TRỪ 1000 phần tử có điểm cao nhất.
+        // Giải thích cú pháp (0, -1001):
+        // 0: Vị trí thấp nhất (điểm bét bảng)
+        // -1001: Phần tử đứng thứ 1001 tính từ trên cao xuống.
+        // Nếu tổng bài hát < 1000, lệnh này an toàn và không làm gì cả.
+        const removedCount = await redisClient.zRemRangeByRank('chart:trending', 0, -1001);
+
+        console.log(` [CronJob - Daily] Đã dọn dẹp ${removedCount} bài hát rớt hạng sâu khỏi bộ nhớ Redis.`);
+
+    } catch (error) {
+        console.error(" [CronJob - Daily] Lỗi dọn dẹp Redis:", error);
     }
 });

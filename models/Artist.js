@@ -1,13 +1,19 @@
 import mongoose from 'mongoose';
 
 const artistSchema = new mongoose.Schema({
+    // LIÊN KẾT TÀI KHOẢN ĐĂNG NHẬP VỚI HỒ SƠ NGHỆ SĨ
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    
     name: { type: String, required: true, unique: true },
     image: { type: String, required: true },
     bio: { type: String, default: "" },
-    followersCount: { type: Number, default: 0 } 
+    followersCount: { type: Number, default: 0 },
+    
+    // Dành cho Admin cấp Tích xanh
+    isVerified: { type: Boolean, default: false } 
 }, { 
     timestamps: true,
-    toJSON: { virtuals: true }, // Cho phép hiện virtual khi res.json()
+    toJSON: { virtuals: true }, 
     toObject: { virtuals: true }
 });
 

@@ -7,6 +7,16 @@ const songSchema = new mongoose.Schema({
     imageUrl: { type: String, required: true }, 
     duration: { type: Number, required: true }, 
     
+    // --- CÁC TRƯỜNG DÀNH CHO AI & KIỂM DUYỆT ---
+    status: { 
+        type: String, 
+        enum: ['draft', 'pending_ai', 'flagged', 'live', 'rejected'], 
+        default: 'pending_ai' // Mặc định khi Artist upload là phải chờ AI
+    },
+    aiSimilarityScore: { type: Number, default: 0 }, // Lưu % đạo nhạc
+    aiMatchedSong: { type: String, default: null },  // Lưu tên bài hát gốc nếu bị trùng
+    // -------------------------------------------
+
     // Quan hệ
     artist: { type: mongoose.Schema.Types.ObjectId, ref: 'Artist', required: true },
     album: { type: mongoose.Schema.Types.ObjectId, ref: 'Album' }, 
