@@ -44,19 +44,62 @@ export const rejectSong = async (req, res) => {
         const { songId } = req.params;
         const song = await Song.findById(songId);
 
-        if (!song) return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+        if (!song) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+        }
 
+        // Chỉ cho phép reject các bài đang ở trạng thái cần review
+        if (!['flagged', 'pending_ai'].includes(song.status)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Không thể từ chối bài hát đang ở trạng thái "${song.status}"` 
+            });
+        }
+
+        // === XÓA FILE TRÊN CLOUDINARY ===
+        const deletePromises = [];
+
+        if (song.imageUrl) {
+            const imagePublicId = getPublicId(song.imageUrl);
+            if (imagePublicId) {
+                deletePromises.push(
+                    cloudinary.uploader.destroy(imagePublicId, { resource_type: 'image' })
+                        .catch(err => console.log("Lỗi xóa ảnh:", err.message))
+                );
+            }
+        }
+
+        if (song.audioUrl) {
+            const audioPublicId = getPublicId(song.audioUrl);
+            if (audioPublicId) {
+                deletePromises.push(
+                    cloudinary.uploader.destroy(audioPublicId, { resource_type: 'video' })
+                        .catch(err => console.log("Lỗi xóa audio:", err.message))
+                );
+            }
+        }
+
+        // Chờ xóa file xong
+        await Promise.all(deletePromises);
+
+        // === CẬP NHẬT TRẠNG THÁI ===
         song.status = 'rejected';
-        // Có thể bổ sung logic gọi API Cloudinary để xóa file audio/image cho đỡ tốn dung lượng
-
         await song.save();
 
-        res.status(200).json({ success: true, message: 'Đã TỪ CHỐI bài hát!', song });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Đã từ chối và xóa file bài hát thành công.', 
+            song 
+        });
 
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Lỗi hệ thống', error: error.message });
+        console.error("Reject Song Error:", error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Lỗi hệ thống khi từ chối bài hát', 
+            error: error.message 
+        });
     }
-
 };
 
 // --- THỐNG KÊ DASHBOARD ---
@@ -85,36 +128,4 @@ export const getDashboardStats = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 
-};
-
-// --- QUẢN LÝ THỂ LOẠI (CATEGORY) ---
-export const addCategory = async (req, res) => {
-    try {
-        const { name, color } = req.body;
-
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'Vui lòng tải lên ảnh đại diện cho Thể loại' });
-        }
-
-        const category = await Category.create({
-            name,
-            color: color || '#000000',
-            image: req.file.path // URL từ Cloudinary storage
-        });
-
-        res.status(201).json({ success: true, message: 'Thêm thể loại thành công!', category });
-
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-
-};
-
-export const getAllCategories = async (req, res) => {
-    try {
-        const categories = await Category.find().sort({ createdAt: -1 });
-        res.status(200).json({ success: true, categories });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
 };
