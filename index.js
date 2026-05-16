@@ -11,7 +11,7 @@ import playlistRouter from './routes/playlistRoute.js';
 import userRoutes from "./routes/userRoute.js";
 import chartRoute from './routes/chartRoute.js';
 import adminRoute from './routes/adminRoute.js';
-import artistRequestRouter from './routes/artistRequestRoute.js';
+import artistRequestRoutes from './routes/artistRequestRoutes.js';
 import './workers/playCountWorker.js';
 import './cronjobs/trendingDecay.js';
 
@@ -39,7 +39,7 @@ app.use("/api/category", categoryRouter);
 app.use('/api/playlist', playlistRouter);
 app.use("/api/user", userRoutes);
 app.use('/api/charts', chartRoute);
-app.use('/api/artist-requests', artistRequestRouter);
+app.use('/api/artist-requests', artistRequestRoutes);
 app.use('/api/admin', adminRoute);
 
 // Khởi chạy server

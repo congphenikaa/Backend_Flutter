@@ -13,6 +13,7 @@
     "seed:create-artist": "node scripts/createTestArtist.js"
   },
   "dependencies": {
+    "@clerk/clerk-sdk-node": "^4.13.23",
     "axios": "^1.16.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.71.0",
@@ -22,6 +23,7 @@
     "express": "^5.2.1",
     "form-data": "^4.0.5",
     "fuse.js": "^7.1.0",
+    "google-auth-library": "^10.6.2",
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.0.1",

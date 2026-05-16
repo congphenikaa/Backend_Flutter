@@ -3,7 +3,11 @@ import mongoose from 'mongoose';
 const userSchema = new mongoose.Schema({
     username: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+    password: { 
+        type: String, 
+        required: false,           
+        select: false              
+    },
     role: { 
         type: String, 
         enum: ['user', 'artist', 'admin'], 
@@ -11,6 +15,12 @@ const userSchema = new mongoose.Schema({
     },
     avatar: { type: String, default: "" },
     gender: { type: String, enum: ['male', 'female', 'other'] },
+    googleId: { type: String, default: null },
+    authProvider: { 
+        type: String, 
+        enum: ['local', 'google'], 
+        default: 'local' 
+    },
     
     // Quan hệ
     likedSongs: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Song' }],

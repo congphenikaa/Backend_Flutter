@@ -3,12 +3,9 @@ import {
 	getModerationQueue,
 	approveSong,
 	rejectSong,
-	getDashboardStats,
-	addCategory,
-	getAllCategories
+	getDashboardStats
 } from '../controllers/adminController.js';
 import { protect, restrictTo } from '../middlewares/authMiddleware.js';
-import { upload } from '../configs/cloudinaryConfig.js';
 
 const router = express.Router();
 
@@ -16,19 +13,15 @@ const router = express.Router();
 router.use(protect, restrictTo('admin'));
 
 // --- HÀNG ĐỢI KIỂM DUYỆT ---
-// Lấy danh sách
+// Lấy danh sách bài hát đang chờ duyệt
 router.get('/moderation/queue', getModerationQueue);
 
-// Quyết định của Admin
+// Quyết định của Admin (Duyệt hoặc Từ chối)
 router.put('/moderation/:songId/approve', approveSong);
 router.put('/moderation/:songId/reject', rejectSong);
 
 // --- DASHBOARD ANALYTICS ---
 router.get('/dashboard/stats', getDashboardStats);
 
-// --- QUẢN LÝ THỂ LOẠI (CATEGORY) ---
-router.get('/categories', getAllCategories);
-// Dùng upload.single('image') để lưu trực tiếp ảnh category lên Cloudinary
-router.post('/categories/add', upload.single('image'), addCategory);
 
 export default router;
