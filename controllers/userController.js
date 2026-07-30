@@ -1,5 +1,6 @@
 import User from "../models/User.js"; 
 import Artist from "../models/Artist.js";
+import bcrypt from 'bcryptjs';
 
 // Lấy thông tin chi tiết User theo ID
 const getUserDetail = async (req, res) => {
@@ -157,5 +158,67 @@ const updateUserProfile = async (req, res) => {
     res.status(500).json({ success: false, message: "Lỗi Server" });
   }
 };
-  
-export { getUserDetail, toggleLikeSong, toggleFollowArtist, getLikedSongs, updateUserProfile  };
+// ─── Tìm kiếm user theo username (dùng cho chức năng chat) ──────────────
+// GET /api/user/search?q=<từ khóa>
+const searchUsers = async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 1) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const users = await User.find({
+      username: { $regex: q, $options: 'i' }, // Chỉ tìm theo username (field duy nhất trong schema)
+      _id:      { $ne: req.user._id },          // Trừ bản thân
+      isActive: { $ne: false },                 // Bắt luôn user cũ chưa có field isActive (undefined != false)
+    })
+      .select('_id username avatar')
+      .limit(20)
+      .lean();
+
+    return res.json({ success: true, data: users });
+  } catch (error) {
+    console.error('searchUsers error:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// --- ĐỔI MẬT KHẨU ---
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { oldPassword, newPassword } = req.body;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Vui lòng nhập đầy đủ mật khẩu cũ và mới" });
+    }
+
+    const user = await User.findById(userId).select('+password');
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
+    }
+
+    // Kiểm tra xem người dùng có đăng nhập bằng Google không
+    if (!user.password) {
+      return res.status(400).json({ success: false, message: "Tài khoản của bạn được tạo qua Google, không thể đổi mật khẩu" });
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Mật khẩu cũ không đúng" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    user.password = hashedPassword;
+    await user.save();
+
+    res.status(200).json({ success: true, message: "Đổi mật khẩu thành công" });
+  } catch (error) {
+    console.error("Lỗi đổi mật khẩu:", error);
+    res.status(500).json({ success: false, message: "Lỗi Server" });
+  }
+};
+
+export { getUserDetail, toggleLikeSong, toggleFollowArtist, getLikedSongs, updateUserProfile, searchUsers, changePassword };

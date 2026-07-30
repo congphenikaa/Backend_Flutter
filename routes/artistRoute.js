@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
     addArtist, listArtist, removeArtist, updateArtist, getArtistDetail, 
-    uploadSong, getMySongs, createAlbum, addSongToAlbum, getMyAlbums, getDashboardStats 
+    uploadSong, getMySongs, createAlbum, addSongToAlbum, getMyAlbums, updateAlbum, deleteAlbum, getDashboardStats 
 } from '../controllers/artistController.js';
 import upload from '../configs/cloudinaryConfig.js';
 import { protect, restrictTo } from '../middlewares/authMiddleware.js';
@@ -34,6 +34,8 @@ artistRouter.get('/my-songs', getMySongs);
 artistRouter.post('/albums/create', upload.single('image'), createAlbum);
 artistRouter.put('/albums/add-song', addSongToAlbum);
 artistRouter.get('/albums', getMyAlbums);
+artistRouter.put('/albums/update', upload.single('image'), updateAlbum);
+artistRouter.delete('/albums/delete', deleteAlbum);
 
 // Thống kê dành cho nghệ sĩ
 artistRouter.get('/dashboard/stats', getDashboardStats);

@@ -17,6 +17,14 @@ export const protect = async (req, res, next) => {
             // Tim user trong db va gan vao req.user (de dung o cac buoc sau)
             req.user = await User.findById(decoded.id).select('-password');
 
+            // Kiểm tra xem user có tồn tại và không bị khóa không
+            if (!req.user) {
+                return res.status(401).json({ message: 'Người dùng không tồn tại' });
+            }
+            if (req.user.isActive === false) {
+                return res.status(403).json({ message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin' });
+            }
+
             next(); // cho phep di tiep
 
         }catch (error) {

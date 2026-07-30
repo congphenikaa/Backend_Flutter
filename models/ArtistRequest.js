@@ -49,5 +49,7 @@ const artistRequestSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+artistRequestSchema.index({ status: 1 });
+
 const ArtistRequest = mongoose.model('ArtistRequest', artistRequestSchema);
 export default ArtistRequest;

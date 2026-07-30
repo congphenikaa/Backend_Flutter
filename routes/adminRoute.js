@@ -3,7 +3,10 @@ import {
 	getModerationQueue,
 	approveSong,
 	rejectSong,
-	getDashboardStats
+	getDashboardStats,
+	getAllUsers,
+	updateUserRole,
+	toggleUserStatus
 } from '../controllers/adminController.js';
 import { protect, restrictTo } from '../middlewares/authMiddleware.js';
 
@@ -23,5 +26,9 @@ router.put('/moderation/:songId/reject', rejectSong);
 // --- DASHBOARD ANALYTICS ---
 router.get('/dashboard/stats', getDashboardStats);
 
+// --- QUẢN LÝ NGƯỜI DÙNG ---
+router.get('/users', getAllUsers);
+router.put('/users/:id/role', updateUserRole);
+router.put('/users/:id/status', toggleUserStatus);
 
 export default router;

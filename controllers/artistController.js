@@ -1,10 +1,39 @@
 import Artist from '../models/Artist.js';
 import Album from '../models/Album.js';
 import Song from '../models/Songs.js';
+import PendingSong from '../models/PendingSong.js';
+import CopyrightStrike from '../models/CopyrightStrike.js';
+import mongoose from 'mongoose';
 import {v2 as cloudinary} from 'cloudinary';
 import axios from 'axios';
 import FormData from 'form-data';
 import streamifier from 'streamifier';
+
+const getCloudinaryPublicId = (url) => {
+    if (!url || typeof url !== 'string' || !url.includes('/upload/')) {
+        return null;
+    }
+
+    const cleanUrl = url.split('?')[0];
+    const parts = cleanUrl.split('/');
+    const fileName = parts.pop();
+    const folder = parts.pop();
+
+    if (!fileName || !folder) {
+        return null;
+    }
+
+    return `${folder}/${fileName.split('.')[0]}`;
+};
+
+const destroyCloudinaryAsset = async (url, resourceType) => {
+    const publicId = getCloudinaryPublicId(url);
+    if (!publicId) {
+        return;
+    }
+
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+};
 
 const addArtist = async (req, res) => {
     try {
@@ -139,7 +168,7 @@ const getArtistDetail = async (req, res) => {
         const albums = await Album.find({ artist: id }).sort({ releaseDate: -1 });
 
         // 3. Lấy Top bài hát (ví dụ top 10 bài nhiều lượt nghe nhất)
-        const topSongs = await Song.find({ artist: id })
+        const topSongs = await Song.find({ artist: id, status: 'live' })
             .sort({ plays: -1 })
             .limit(10);
 
@@ -181,6 +210,10 @@ export const uploadSong = async (req, res) => {
 
         if (!req.files || !req.files.audio || !req.files.image) {
             return res.status(400).json({ success: false, message: 'Vui lòng cung cấp đủ file audio và ảnh bìa (image).' });
+        }
+
+        if (!title || !description || !duration) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập đủ tiêu đề, mô tả và thời lượng bài hát.' });
         }
 
         const audioFile = req.files.audio[0];
@@ -226,65 +259,135 @@ export const uploadSong = async (req, res) => {
             return res.status(500).json({ success: false, message: 'Server kiểm duyệt AI đang bảo trì. Vui lòng thử lại sau.' });
         }
 
-        const bestMatch = aiResult?.top_matches?.length > 0 ? aiResult.top_matches[0] : null;
-        const similarityScore = bestMatch ? bestMatch.raw_score : 0;
-        const matchedSongName = bestMatch ? bestMatch.song_name : null;
+        // ==================================================
+        // Lấy thông tin từ AI (Yêu cầu FastAPI trả về risk_level)
+        // ==================================================
+        const riskLevel = (aiResult.risk_level || 'LOW').toUpperCase(); // LOW, MEDIUM, HIGH
+        const highestScore = aiResult.raw_ai_score || 0;
+        const matchedSongName = aiResult.matched_song || 'Không xác định';
+        const aiMatches = aiResult.matches || [];
 
-        // XỬ LÝ NẾU BỊ ĐÁNH GẬY BẢN QUYỀN (REJECTED)
-        if (aiResult.copyright_strike) {
+        // ==================================================
+        // NHÁNH 1: RỦI RO CAO (HIGH) -> CHỈ GHI NHẬN VI PHẠM
+        // ==================================================
+        if (riskLevel === 'HIGH') {
+            const strike = await CopyrightStrike.create({
+                title,
+                description,
+                duration: Number(duration),
+                category: parsedCategory,
+                artist: artist._id,
+                userId: req.user._id,
+                album: parsedAlbum,
+                audioUrl: null,
+                imageUrl: null,
+                aiSimilarityScore: Math.round(highestScore * 100),
+                aiMatchedSong: matchedSongName,
+                aiMatches: aiMatches,
+                strikeReason: `AI risk level HIGH: ${matchedSongName}`
+            });
+
+            return res.status(403).json({
+                success: false,
+                message: `Phát hiện vi phạm bản quyền! Bài hát giống bài '${matchedSongName}' tới ${Math.round(highestScore * 100)}%. Đã bị từ chối.`,
+                strike
+            });
+        }
+
+        // ==================================================
+        // UPLOAD FILES CHỈ KHI BÀI HÁT KHÔNG BỊ TỪ CHỐI
+        // ==================================================
+        let audioUploadResult = null;
+        let imageUploadResult = null;
+
+        try {
+            const [audioUploadSettled, imageUploadSettled] = await Promise.allSettled([
+                uploadToCloudinary(audioFile.buffer, 'video', 'songs_audio'),
+                uploadToCloudinary(imageFile.buffer, 'image', 'songs_images')
+            ]);
+
+            if (audioUploadSettled.status !== 'fulfilled' || imageUploadSettled.status !== 'fulfilled') {
+                if (audioUploadSettled.status === 'fulfilled') {
+                    await destroyCloudinaryAsset(audioUploadSettled.value.secure_url, 'video');
+                }
+
+                if (imageUploadSettled.status === 'fulfilled') {
+                    await destroyCloudinaryAsset(imageUploadSettled.value.secure_url, 'image');
+                }
+
+                throw new Error('Không thể tải file lên Cloudinary');
+            }
+
+            audioUploadResult = audioUploadSettled.value;
+            imageUploadResult = imageUploadSettled.value;
+        } catch (uploadError) {
+            console.error('Lỗi upload Cloudinary:', uploadError.message);
+            return res.status(500).json({ success: false, message: 'Lỗi tải file lên hệ thống lưu trữ', error: uploadError.message });
+        }
+
+        let responseMessage = 'Tải bài hát thành công và đã được công khai!';
+        const uploadedAssetUrls = [
+            { url: audioUploadResult.secure_url, resourceType: 'video' },
+            { url: imageUploadResult.secure_url, resourceType: 'image' }
+        ];
+
+        try {
+            // ==================================================
+            // NHÁNH 2: VÙNG NGHI VẤN (MEDIUM) -> ĐẨY CHO ADMIN DUYỆT TAY
+            // ==================================================
+            if (riskLevel === 'MEDIUM') {
+                const pendingSongId = new mongoose.Types.ObjectId();
+                const pendingSong = await PendingSong.create({
+                    _id: pendingSongId,
+                    sourceSongId: pendingSongId,
+                    title,
+                    description,
+                    duration: Number(duration),
+                    category: parsedCategory,
+                    artist: artist._id,
+                    userId: req.user._id,
+                    album: parsedAlbum,
+                    audioUrl: audioUploadResult.secure_url,
+                    imageUrl: imageUploadResult.secure_url,
+                    riskLevel: 'MEDIUM',
+                    aiSimilarityScore: Math.round(highestScore * 100),
+                    aiMatchedSong: matchedSongName,
+                    aiMatches: aiMatches,
+                    sourceReason: 'AI medium risk pending review'
+                });
+
+                responseMessage = 'Bài hát đã được tải lên và đang chờ Admin kiểm duyệt.';
+
+                return res.status(202).json({ success: true, message: responseMessage, song: pendingSong });
+            }
+
+            // ==================================================
+            // LƯU DATABASE TẠO BÀI HÁT MỚI
+            // ==================================================
             const newSong = await Song.create({
                 title,
                 description,
                 duration: Number(duration),
                 category: parsedCategory,
                 artist: artist._id,
-                album: parsedAlbum, // Dùng biến đã parse an toàn
-                audioUrl: 'blocked_by_ai',
-                imageUrl: 'blocked_by_ai',
-                status: 'rejected',
-                aiSimilarityScore: Math.round(similarityScore * 100),
+                album: parsedAlbum,
+                audioUrl: audioUploadResult.secure_url,
+                imageUrl: imageUploadResult.secure_url,
+                status: 'live',
+                aiSimilarityScore: Math.round(highestScore * 100),
                 aiMatchedSong: matchedSongName
             });
 
-            return res.status(403).json({
-                success: false,
-                message: `Phát hiện vi phạm bản quyền! Bài hát giống bài '${matchedSongName}' tới ${Math.round(similarityScore * 100)}%. Đã bị từ chối.`,
-                song: newSong
-            });
+            return res.status(201).json({ success: true, message: responseMessage, song: newSong });
+        } catch (databaseError) {
+            await Promise.allSettled(uploadedAssetUrls.map((asset) => destroyCloudinaryAsset(asset.url, asset.resourceType)));
+            throw databaseError;
         }
-
-        // CHỈ UPLOAD LÊN CLOUDINARY NẾU VƯỢT QUA BÀI TEST AI
-        const [audioUploadResult, imageUploadResult] = await Promise.all([
-            uploadToCloudinary(audioFile.buffer, 'video', 'songs_audio'),
-            uploadToCloudinary(imageFile.buffer, 'image', 'songs_images')
-        ]);
-
-        let finalStatus = 'live';
-        let message = 'Tải bài hát thành công và đã được công khai!';
-
-        // XỬ LÝ NẾU NẰM TRONG VÙNG NGHI VẤN (CẦN ADMIN REVIEW)
-        if (similarityScore >= 0.6 && similarityScore <= 0.85) {
-            finalStatus = 'flagged';
-            message = 'Bài hát đã được tải lên nhưng bị cảnh báo AI (Tương đồng cao). Vui lòng chờ Admin duyệt tay.';
-        }
-
-        // TẠO BÀI HÁT MỚI (LIVE HOẶC FLAGGED)
-        const newSong = await Song.create({
-            title,
-            description,
-            duration: Number(duration),
-            category: parsedCategory,
-            artist: artist._id,
-            album: parsedAlbum, // Dùng biến đã parse an toàn
-            audioUrl: audioUploadResult.secure_url,
-            imageUrl: imageUploadResult.secure_url,
-            status: finalStatus,
-            aiSimilarityScore: Math.round(similarityScore * 100),
-            aiMatchedSong: matchedSongName
-        });
-
-        return res.status(201).json({ success: true, message, song: newSong });
     } catch (error) {
+        if (error && error.name === 'MongooseError') {
+            console.error('Mongoose error while uploading song:', error);
+        }
+
         console.error("Lỗi Upload Song:", error);
         return res.status(500).json({ success: false, message: 'Lỗi server khi upload bài hát', error: error.message });
     }
@@ -297,7 +400,16 @@ export const getMySongs = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Artist not found' });
         }
 
-        const songs = await Song.find({ artist: artist._id }).sort({ createdAt: -1 });
+        const [publishedSongs, pendingSongs] = await Promise.all([
+            Song.find({ artist: artist._id, status: 'live' }).sort({ createdAt: -1 }).lean(),
+            PendingSong.find({ artist: artist._id }).sort({ createdAt: -1 }).lean()
+        ]);
+
+        const songs = [
+            ...publishedSongs.map((song) => ({ ...song, sourceCollection: 'Song', moderationState: 'live' })),
+            ...pendingSongs.map((song) => ({ ...song, sourceCollection: 'PendingSong', moderationState: song.status || 'pending_review' }))
+        ].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+
         return res.status(200).json({ success: true, songs });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -361,6 +473,10 @@ export const addSongToAlbum = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Bài hát không tồn tại.' });
         }
 
+        if (song.status !== 'live') {
+            return res.status(400).json({ success: false, message: 'Chỉ có thể thêm bài hát đã phát hành vào album.' });
+        }
+
         if (song.artist.toString() !== artist._id.toString()) {
             return res.status(403).json({ success: false, message: 'Bài hát không phải của bạn.' });
         }
@@ -394,6 +510,106 @@ export const getMyAlbums = async (req, res) => {
     }
 };
 
+export const updateAlbum = async (req, res) => {
+    try {
+        const artist = await Artist.findOne({ userId: req.user._id });
+        if (!artist) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ Nghệ sĩ của bạn.' });
+        }
+
+        const { albumId, title, description, songIds } = req.body;
+
+        if (!albumId) {
+            return res.status(400).json({ success: false, message: 'Vui lòng cung cấp albumId.' });
+        }
+
+        const album = await Album.findById(albumId);
+        if (!album) {
+            return res.status(404).json({ success: false, message: 'Album không tồn tại.' });
+        }
+
+        if (album.artist.toString() !== artist._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền chỉnh sửa album này.' });
+        }
+
+        if (title) album.title = title;
+        if (description !== undefined) album.description = description;
+
+        // Nếu có ảnh mới thì xóa ảnh cũ và upload ảnh mới
+        if (req.file) {
+            if (album.image) {
+                try {
+                    const oldPublicId = album.image.split('/').slice(-2).join('/').split('.')[0];
+                    await cloudinary.uploader.destroy(oldPublicId, { resource_type: 'image' });
+                } catch (err) {
+                    console.log('Lỗi xóa ảnh bìa cũ:', err);
+                }
+            }
+            album.image = req.file.path;
+        }
+
+        // Nếu có danh sách bài hát mới thì cập nhật
+        if (songIds) {
+            let parsedSongIds;
+            try {
+                parsedSongIds = JSON.parse(songIds);
+            } catch {
+                parsedSongIds = Array.isArray(songIds) ? songIds : [songIds];
+            }
+            album.songs = parsedSongIds;
+        }
+
+        await album.save();
+        const updatedAlbum = await Album.findById(albumId).populate('songs');
+        return res.status(200).json({ success: true, message: 'Cập nhật album thành công!', album: updatedAlbum });
+    } catch (error) {
+        if (req.file) {
+            try {
+                await cloudinary.uploader.destroy(req.file.filename);
+            } catch (_) {}
+        }
+        return res.status(500).json({ success: false, message: 'Lỗi cập nhật album', error: error.message });
+    }
+};
+
+export const deleteAlbum = async (req, res) => {
+    try {
+        const artist = await Artist.findOne({ userId: req.user._id });
+        if (!artist) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy hồ sơ Nghệ sĩ của bạn.' });
+        }
+
+        const { albumId } = req.body;
+        if (!albumId) {
+            return res.status(400).json({ success: false, message: 'Vui lòng cung cấp albumId.' });
+        }
+
+        const album = await Album.findById(albumId);
+        if (!album) {
+            return res.status(404).json({ success: false, message: 'Album không tồn tại.' });
+        }
+
+        if (album.artist.toString() !== artist._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa album này.' });
+        }
+
+        // Xóa ảnh bìa trên Cloudinary
+        if (album.image) {
+            try {
+                const imagePublicId = album.image.split('/').slice(-2).join('/').split('.')[0];
+                await cloudinary.uploader.destroy(imagePublicId, { resource_type: 'image' });
+            } catch (err) {
+                console.log('Lỗi xóa ảnh bìa album:', err);
+            }
+        }
+
+        await Album.findByIdAndDelete(albumId);
+        return res.status(200).json({ success: true, message: 'Xóa album thành công!' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Lỗi xóa album', error: error.message });
+    }
+};
+
 export const getDashboardStats = async (req, res) => {
     try {
         const artist = await Artist.findOne({ userId: req.user._id });
@@ -406,24 +622,53 @@ export const getDashboardStats = async (req, res) => {
         ]);
         const totalStreams = playStats.length > 0 ? playStats[0].totalPlays : 0;
 
-        // 2. Đếm tổng số bài hát và Album
-        const totalTracks = await Song.countDocuments({ artist: artist._id });
-        const totalAlbums = await Album.countDocuments({ artist: artist._id });
+        // 2. Đếm tổng số bài hát đã phát hành và bài đang chờ duyệt
+        const [publishedTrackCount, pendingTrackCount, totalAlbums] = await Promise.all([
+            Song.countDocuments({ artist: artist._id, status: 'live' }),
+            PendingSong.countDocuments({ artist: artist._id }),
+            Album.countDocuments({ artist: artist._id })
+        ]);
+        const totalTracks = publishedTrackCount + pendingTrackCount;
 
-        // 3. Lấy 4 bài hát tải lên gần nhất (Recent Uploads)
-        const recentUploads = await Song.find({ artist: artist._id })
-            .sort({ createdAt: -1 })
-            .limit(4)
-            .select('title imageUrl status plays createdAt');
+        // 3. Lấy 4 bài hát tải lên gần nhất (Recent Uploads) + Top 5 bài hát nhiều plays nhất
+        const [recentPublishedSongs, recentPendingSongs, topTracks] = await Promise.all([
+            Song.find({ artist: artist._id, status: 'live' })
+                .sort({ createdAt: -1 })
+                .limit(4)
+                .select('title imageUrl status plays createdAt')
+                .lean(),
+            PendingSong.find({ artist: artist._id })
+                .sort({ createdAt: -1 })
+                .limit(4)
+                .select('title imageUrl status createdAt')
+                .lean(),
+            Song.find({ artist: artist._id, status: 'live' })
+                .sort({ plays: -1 })
+                .limit(5)
+                .select('title imageUrl plays duration createdAt')
+                .lean()
+        ]);
+
+        const recentUploads = [
+            ...recentPublishedSongs.map((song) => ({ ...song, sourceCollection: 'Song' })),
+            ...recentPendingSongs.map((song) => ({ ...song, sourceCollection: 'PendingSong', plays: 0 }))
+        ]
+            .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+            .slice(0, 4);
 
         res.status(200).json({
             success: true,
             stats: {
+                artistName: artist.name,
+                artistImage: artist.image,
                 totalStreams,
                 totalTracks,
+                publishedTracks: publishedTrackCount,
+                pendingTracks: pendingTrackCount,
                 totalAlbums,
                 followers: artist.followersCount,
-                recentUploads
+                recentUploads,
+                topTracks
             }
         });
     } catch (error) {

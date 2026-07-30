@@ -7,15 +7,14 @@ const songSchema = new mongoose.Schema({
     imageUrl: { type: String, required: true }, 
     duration: { type: Number, required: true }, 
     
-    // --- CÁC TRƯỜNG DÀNH CHO AI & KIỂM DUYỆT ---
-    status: { 
-        type: String, 
-        enum: ['draft', 'pending_ai', 'flagged', 'live', 'rejected'], 
-        default: 'pending_ai' // Mặc định khi Artist upload là phải chờ AI
+    // Song chỉ giữ nội dung đã sẵn sàng phát hành.
+    status: {
+        type: String,
+        enum: ['live'],
+        default: 'live'
     },
-    aiSimilarityScore: { type: Number, default: 0 }, // Lưu % đạo nhạc
-    aiMatchedSong: { type: String, default: null },  // Lưu tên bài hát gốc nếu bị trùng
-    // -------------------------------------------
+    aiSimilarityScore: { type: Number, default: 0 },
+    aiMatchedSong: { type: String, default: null },
 
     // Quan hệ
     artist: { type: mongoose.Schema.Types.ObjectId, ref: 'Artist', required: true },
@@ -27,6 +26,7 @@ const songSchema = new mongoose.Schema({
 
 // Tạo index tìm kiếm
 songSchema.index({ title: 'text' });
+songSchema.index({ createdAt: -1, status: 1 });
 
 const Song = mongoose.model("Song", songSchema);
 export default Song;

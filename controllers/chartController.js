@@ -24,7 +24,7 @@ const chartController = {
             if (topData.length === 0) return res.status(200).json({ success: true, data: [] });
 
             const songIds = topData.map(item => item.value);
-            const songsInfo = await Song.find({ _id: { $in: songIds } }).populate('artist');
+            const songsInfo = await Song.find({ _id: { $in: songIds }, status: 'live' }).populate('artist');
 
             const finalCharts = topData.map((redisItem, index) => {
                 const songDetail = songsInfo.find(s => s._id.toString() === redisItem.value);

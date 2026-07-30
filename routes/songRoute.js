@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
     addSong, listSong, removeSong, updateSong, 
-    listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays
+    listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays, downloadSong
 } from '../controllers/songController.js';
 import { uploadSongFiles } from '../middlewares/uploadMiddleware.js';
 import { protect, restrictTo } from '../middlewares/authMiddleware.js'; 
@@ -14,6 +14,7 @@ songRouter.get('/category/:id', listSongByCategory);
 songRouter.get('/album/:id', listSongByAlbum);
 songRouter.get('/search', searchGlobal);
 songRouter.post('/play', incrementPlays);
+songRouter.get('/download/:id', protect, downloadSong);
 
 // --- ADMIN ROUTES (Upload thủ công, quản lý kho nhạc) ---
 songRouter.use(protect, restrictTo('admin')); // Mọi route bên dưới dòng này đều yêu cầu quyền Admin

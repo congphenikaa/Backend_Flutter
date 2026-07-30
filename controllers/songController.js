@@ -5,6 +5,7 @@ import Fuse from 'fuse.js';
 import {v2 as cloudinary} from 'cloudinary';
 import redisClient from '../configs/redisConfig.js';
 import { playCountQueue } from '../configs/queueConfig.js';
+import https from 'https';
 
 
 // 1. THÊM BÀI HÁT
@@ -59,7 +60,7 @@ const addSong = async (req, res) => {
 const listSong = async (req, res) => {
     try {
         // Populate giúp lấy info chi tiết của Artist, Album, Category
-        const allSongs = await Song.find({})
+        const allSongs = await Song.find({ status: 'live' })
             .populate("artist") 
             .populate("album")
             .populate("category");
@@ -169,7 +170,7 @@ const updateSong = async (req, res) => {
 const listSongByCategory = async (req, res) => {
     try {
         const { id } = req.params; // Lấy ID từ URL
-        const songs = await Song.find({ category: id })
+        const songs = await Song.find({ category: id, status: 'live' })
             .populate("artist");
         res.json({ success: true, songs: songs });
     } catch (error) {
@@ -183,7 +184,7 @@ const listSongByAlbum = async (req, res) => {
     try {
         const { id } = req.params;
         // Tìm bài hát có field 'album' trùng với id gửi lên
-        const songs = await Song.find({ album: id });
+        const songs = await Song.find({ album: id, status: 'live' });
         res.json({ success: true, songs: songs });
     } catch (error) {
         res.json({ success: false, message: "Error" });
@@ -203,7 +204,7 @@ const searchGlobal = async (req, res) => {
         // 2. Lấy dữ liệu thô từ Database (Chỉ lấy các trường cần thiết để tối ưu RAM)
         // Dùng Promise.all để chạy song song 3 câu lệnh query
         const [allSongs, allArtists, allAlbums] = await Promise.all([
-            Song.find({}).populate('artist').populate('album'),
+            Song.find({ status: 'live' }).populate('artist').populate('album'),
             Artist.find({}),
             Album.find({}).populate('artist')
         ]);
@@ -293,5 +294,34 @@ const incrementPlays = async (req, res) => {
     }
 }
 
+// --- TẢI NHẠC (OFFLINE DOWNLOAD) ---
+const downloadSong = async (req, res) => {
+    try {
+        const user = req.user;
+        const isPremiumActive = user.isPremium || (user.premiumExpiresAt && user.premiumExpiresAt > new Date());
+        
+        if (!isPremiumActive) {
+            return res.status(403).json({ success: false, message: "Chỉ tài khoản Premium mới được tải nhạc." });
+        }
+        
+        const song = await Song.findById(req.params.id);
+        if (!song || !song.audioUrl) {
+            return res.status(404).json({ success: false, message: "Bài hát không tồn tại." });
+        }
+
+        https.get(song.audioUrl, (stream) => {
+            res.setHeader('Content-Disposition', `attachment; filename="${song._id}.mp3"`);
+            res.setHeader('Content-Type', 'audio/mpeg');
+            stream.pipe(res);
+        }).on('error', (err) => {
+            console.error("Lỗi stream download:", err);
+            res.status(500).json({ success: false, message: "Lỗi tải xuống luồng dữ liệu" });
+        });
+    } catch (error) {
+        console.error("Lỗi downloadSong:", error);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống" });
+    }
+}
+
 export { addSong, listSong, removeSong, updateSong, 
-    listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays };
+    listSongByCategory, listSongByAlbum, searchGlobal, incrementPlays, downloadSong };
