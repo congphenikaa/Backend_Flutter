@@ -34,6 +34,10 @@ const userSchema = new mongoose.Schema({
     followedArtists: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Artist' }],
     savedPlaylists: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Playlist' }],
 
+    // Lịch sử nghe gần đây — tối đa 50 bài, mới nhất ở đầu (index 0)
+    // Backend đảm bảo deduplication: pull cũ → push mới lên đầu → slice 50
+    recentlyPlayed: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Song' }],
+
     // Push Notification — FCM token do Flutter gửi lên sau khi login
     fcmToken: { type: String, default: null },
 

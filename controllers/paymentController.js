@@ -5,6 +5,8 @@ import Coupon from '../models/Coupon.js';
 import User from '../models/User.js';
 import PremiumPlan from '../models/PremiumPlan.js';
 import Transaction from '../models/Transaction.js';
+import { getIO } from '../sockets/index.js';
+import { sendPushNotification } from '../utils/fcmHelper.js';
 
 const normalizeCouponCode = (code) => (code || '').trim().toUpperCase();
 
@@ -73,13 +75,13 @@ export const createMoMoPayment = async (req, res) => {
         const redirectUrl = `${baseUrl}/api/payment/success`;
         const ipnUrl = `${baseUrl}/api/payment/momo-ipn`;
         const requestType = 'payWithMethod';
-        const paymentCode = 'ATM';
         const extraData = '';
         const partnerName = 'Test';
         const storeId = 'MomoTestStore';
         const autoCapture = true;
         const orderGroupId = '';
 
+        // Signature chuẩn 10 field — KHÔNG có paymentCode
         const rawSignature =
             'accessKey=' + accessKey +
             '&amount=' + finalAmount +
@@ -94,12 +96,13 @@ export const createMoMoPayment = async (req, res) => {
 
         const signature = crypto.createHmac('sha256', secretkey).update(rawSignature).digest('hex');
 
+        // Body cũng KHÔNG có paymentCode — MoMo tự hiện trang chọn method
         const requestBody = {
             partnerCode, partnerName, storeId, accessKey,
             requestId, amount: finalAmount.toString(), orderId,
             orderInfo, redirectUrl, ipnUrl, lang: 'vi',
             autoCapture, extraData, requestType, orderGroupId,
-            paymentCode, signature,
+            signature,
         };
 
         const response = await axios.post('https://test-payment.momo.vn/v2/gateway/api/create', requestBody, {
@@ -235,6 +238,33 @@ export const momoIPN = async (req, res) => {
             await Coupon.findByIdAndUpdate(couponId, { $inc: { usedCount: 1 } });
         }
 
+        // ★ Gửi Socket event real-time đến user
+        try {
+            const io = getIO();
+            const expiresAtFormatted = expiresAt.toLocaleDateString('vi-VN');
+            io.to(`user:${userId}`).emit('premium:activated', {
+                isPremium: true,
+                premiumExpiresAt: expiresAt.toISOString(),
+                premiumPlanCode: planCode,
+                source: 'payment', // phân biệt với admin grant
+                message: `Thanh toán thành công! Premium hiệu lực đến ${expiresAtFormatted}.`,
+            });
+        } catch (socketErr) {
+            console.warn('[Socket] Không thể emit premium:activated (IPN):', socketErr.message);
+        }
+
+        // ★ Gửi FCM Push (backup khi app bị tắt)
+        sendPushNotification(userId, {
+            title: '👑 Premium đã kích hoạt!',
+            body: `Gói ${planCode} của bạn đã được kích hoạt thành công. Trải nghiệm không giới hạn ngay bây giờ!`,
+            data: {
+                type: 'premiumActivated',
+                planCode: planCode || '',
+                premiumExpiresAt: expiresAt.toISOString(),
+                source: 'payment',
+            },
+        });
+
         console.log(`[IPN] Đã cập nhật premium user ${userId} — hết hạn: ${expiresAt.toISOString()}`);
     } catch (error) {
         console.error('[IPN] Lỗi cập nhật premium:', error.message);
@@ -274,5 +304,125 @@ export const checkAndExpirePremium = async (req, res) => {
         return res.status(200).json({ success: true });
     } catch (error) {
         return res.status(500).json({ success: false });
+    }
+};
+
+// ─── Admin: Hủy giao dịch pending/failed ──────────────────────────────────────
+// Chỉ cho phép cancel nếu status là pending hoặc failed (không phải success)
+export const cancelPendingTransaction = async (req, res) => {
+    try {
+        const { transactionId } = req.params;
+        const tx = await Transaction.findById(transactionId);
+
+        if (!tx) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch' });
+        }
+        if (tx.status === 'success') {
+            return res.status(400).json({ success: false, message: 'Không thể hủy giao dịch đã thành công' });
+        }
+        if (tx.status === 'cancelled') {
+            return res.status(400).json({ success: false, message: 'Giao dịch đã được hủy trước đó' });
+        }
+
+        await Transaction.findByIdAndUpdate(transactionId, {
+            status: 'cancelled',
+            note: `Admin hủy thủ công lúc ${new Date().toISOString()}`,
+        });
+
+        console.log(`[ADMIN] Đã hủy transaction ${tx.orderId} (trạng thái cũ: ${tx.status})`);
+        return res.status(200).json({ success: true, message: 'Đã hủy giao dịch thành công' });
+    } catch (error) {
+        console.error('[ADMIN] Lỗi hủy transaction:', error.message);
+        return res.status(500).json({ success: false, message: 'Lỗi hủy giao dịch', error: error.message });
+    }
+};
+
+// ─── Admin: Xử lý thủ công — mark success + cấp premium ──────────────────────
+// Dùng khi IPN bị mất, resultCode lỗi sandbox, hoặc admin xác nhận user đã trả tiền
+export const adminResolveTransaction = async (req, res) => {
+    try {
+        const { transactionId } = req.params;
+        const tx = await Transaction.findById(transactionId);
+
+        if (!tx) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch' });
+        }
+        if (tx.status === 'success') {
+            return res.status(400).json({ success: false, message: 'Giao dịch này đã thành công rồi' });
+        }
+        if (tx.status === 'cancelled') {
+            return res.status(400).json({ success: false, message: 'Giao dịch đã bị hủy, không thể resolve' });
+        }
+
+        // 1. Cập nhật transaction → success
+        await Transaction.findByIdAndUpdate(transactionId, {
+            status: 'success',
+            ipnReceivedAt: tx.ipnReceivedAt || new Date(),
+            note: `Admin xác nhận thủ công lúc ${new Date().toISOString()}`,
+        });
+
+        // 2. Cấp premium cho user (gia hạn từ ngày hết hạn hiện tại nếu còn hạn)
+        const { userId, durationDays, planCode, couponId } = tx;
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy user trong giao dịch này' });
+        }
+
+        const startDate = (user.isPremium && user.premiumExpiresAt && user.premiumExpiresAt > new Date())
+            ? user.premiumExpiresAt : new Date();
+
+        const expiresAt = new Date(startDate);
+        expiresAt.setDate(expiresAt.getDate() + durationDays);
+
+        await User.findByIdAndUpdate(userId, {
+            isPremium: true,
+            premiumExpiresAt: expiresAt,
+            premiumPlanCode: planCode,
+            premiumGrantedAt: new Date(),
+        });
+
+        await Transaction.findByIdAndUpdate(transactionId, { premiumExpiresAt: expiresAt });
+
+        // 3. Tăng usedCount coupon nếu có (và chưa tăng trước đó — tránh double count)
+        if (couponId) {
+            await Coupon.findByIdAndUpdate(couponId, { $inc: { usedCount: 1 } });
+        }
+
+        // 4. Gửi Socket event real-time đến user
+        try {
+            const io = getIO();
+            const expiresAtFormatted = expiresAt.toLocaleDateString('vi-VN');
+            io.to(`user:${userId}`).emit('premium:activated', {
+                isPremium: true,
+                premiumExpiresAt: expiresAt.toISOString(),
+                premiumPlanCode: planCode,
+                source: 'admin_resolve',
+                message: `Admin đã xác nhận giao dịch! Premium hiệu lực đến ${expiresAtFormatted}.`,
+            });
+        } catch (socketErr) {
+            console.warn('[Socket] Không thể emit premium:activated (admin resolve):', socketErr.message);
+        }
+
+        // 5. Gửi FCM Push
+        sendPushNotification(userId, {
+            title: '👑 Premium đã kích hoạt!',
+            body: `Giao dịch của bạn đã được xác nhận. Gói ${planCode} hiệu lực đến ${expiresAt.toLocaleDateString('vi-VN')}.`,
+            data: {
+                type: 'premiumActivated',
+                planCode: planCode || '',
+                premiumExpiresAt: expiresAt.toISOString(),
+                source: 'admin_resolve',
+            },
+        });
+
+        console.log(`[ADMIN] Đã resolve thủ công transaction ${tx.orderId} — user ${userId} → premium đến ${expiresAt.toISOString()}`);
+        return res.status(200).json({
+            success: true,
+            message: `Đã cấp Premium cho user đến ${expiresAt.toLocaleDateString('vi-VN')}`,
+            premiumExpiresAt: expiresAt,
+        });
+    } catch (error) {
+        console.error('[ADMIN] Lỗi resolve transaction:', error.message);
+        return res.status(500).json({ success: false, message: 'Lỗi xử lý giao dịch', error: error.message });
     }
 };

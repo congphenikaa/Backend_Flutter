@@ -1,6 +1,8 @@
-import ArtistRequest from "../models/ArtistRequest.js";     
+import ArtistRequest from "../models/ArtistRequest.js";
 import User from "../models/User.js";
 import Artist from "../models/Artist.js";
+import { getIO } from "../sockets/index.js";
+import { sendPushNotification } from "../utils/fcmHelper.js";
 
 // 1. User gửi đơn đề xuất
 export const createRequest = async (req, res) => {
@@ -126,6 +128,30 @@ export const approveRequest = async (req, res) => {
             console.log("Đã cập nhật hồ sơ Artist:", artist.name);
         }
 
+        // 4. Gửi Socket event real-time đến user
+        try {
+            const io = getIO();
+            io.to(`user:${request.user}`).emit('artist_request:result', {
+                status: 'approved',
+                requestId: request._id.toString(),
+                artistName: request.artistName,
+                message: 'Đơn đề xuất Artist của bạn đã được duyệt!',
+            });
+        } catch (socketErr) {
+            console.warn('[Socket] Không thể emit artist_request:result (approved):', socketErr.message);
+        }
+
+        // 5. Gửi FCM Push Notification (backup khi app bị tắt)
+        sendPushNotification(request.user, {
+            title: ' Đơn Artist được duyệt!',
+            body: `Chúc mừng! Đơn đề xuất Artist "${request.artistName}" đã được phê duyệt.`,
+            data: {
+                type: 'artistRequest',
+                status: 'approved',
+                requestId: request._id.toString(),
+            },
+        });
+
         res.status(200).json({
             success: true,
             message: "Đã duyệt đơn và tạo/cập nhật hồ sơ Artist thành công"
@@ -156,6 +182,35 @@ export const rejectRequest = async (req, res) => {
         if (adminNote) request.adminNote = adminNote;
         await request.save();
 
+        // Gửi Socket event real-time đến user
+        try {
+            const io = getIO();
+            io.to(`user:${request.user}`).emit('artist_request:result', {
+                status: 'rejected',
+                requestId: request._id.toString(),
+                adminNote: adminNote || '',
+                message: adminNote
+                    ? `Đơn bị từ chối. Lý do: ${adminNote}`
+                    : 'Đơn đề xuất Artist của bạn đã bị từ chối.',
+            });
+        } catch (socketErr) {
+            console.warn('[Socket] Không thể emit artist_request:result (rejected):', socketErr.message);
+        }
+
+        // Gửi FCM Push Notification (backup khi app bị tắt)
+        sendPushNotification(request.user, {
+            title: 'Đơn Artist bị từ chối',
+            body: adminNote
+                ? `Lý do: ${adminNote}`
+                : 'Đơn đề xuất Artist của bạn đã bị từ chối.',
+            data: {
+                type: 'artistRequest',
+                status: 'rejected',
+                requestId: request._id.toString(),
+                adminNote: adminNote || '',
+            },
+        });
+
         res.status(200).json({
             success: true,
             message: "Đã từ chối đơn"
@@ -183,17 +238,17 @@ export const cancelRequest = async (req, res) => {
 
         // Chỉ cho phép hủy khi đang pending
         if (request.status !== 'pending') {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Chỉ được hủy đơn khi đang ở trạng thái chờ duyệt" 
+            return res.status(400).json({
+                success: false,
+                message: "Chỉ được hủy đơn khi đang ở trạng thái chờ duyệt"
             });
         }
 
         await ArtistRequest.findByIdAndDelete(id);
 
-        res.status(200).json({ 
-            success: true, 
-            message: "Đã hủy đơn đề xuất thành công" 
+        res.status(200).json({
+            success: true,
+            message: "Đã hủy đơn đề xuất thành công"
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

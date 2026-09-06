@@ -11,7 +11,8 @@
     "start": "nodemon index.js",
     "seed:artist": "node scripts/createArtistAccount.js",
     "seed:create-artist": "node scripts/createTestArtist.js",
-    "seed:premium": "node scripts/seedPremiumCatalog.js"
+    "seed:premium": "node scripts/seedPremiumCatalog.js",
+    "transactions:cancel-pending": "node scripts/cancelPendingTransactions.js"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",

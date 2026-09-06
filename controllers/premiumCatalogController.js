@@ -2,6 +2,8 @@ import PremiumPlan from '../models/PremiumPlan.js';
 import Coupon from '../models/Coupon.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
+import { getIO } from '../sockets/index.js';
+import { sendPushNotification } from '../utils/fcmHelper.js';
 
 const toPlanResponse = (plan) => ({
     _id: plan._id,
@@ -281,29 +283,45 @@ export const deleteCoupon = async (req, res) => {
 
 // ===================== ADMIN — PREMIUM USERS =====================
 
-const toUserPremiumResponse = (user) => ({
-    _id: user._id,
-    username: user.username,
-    email: user.email,
-    avatar: user.avatar || '',
-    isPremium: user.isPremium,
-    premiumPlanCode: user.premiumPlanCode || null,
-    premiumGrantedAt: user.premiumGrantedAt || null,
-    premiumExpiresAt: user.premiumExpiresAt || null,
-    createdAt: user.createdAt,
-});
+const toUserPremiumResponse = (user) => {
+    // Tính lại isPremium dựa trên premiumExpiresAt thực tế
+    const now = new Date();
+    const isActuallyPremium = user.isPremium &&
+        user.premiumExpiresAt != null &&
+        new Date(user.premiumExpiresAt) > now;
+
+    return {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar || '',
+        isPremium: isActuallyPremium,
+        isExpired: user.isPremium && user.premiumExpiresAt != null && new Date(user.premiumExpiresAt) <= now,
+        premiumPlanCode: user.premiumPlanCode || null,
+        premiumGrantedAt: user.premiumGrantedAt || null,
+        premiumExpiresAt: user.premiumExpiresAt || null,
+        createdAt: user.createdAt,
+    };
+};
 
 export const getAdminPremiumUsers = async (req, res) => {
     try {
         const { search = '', page = 1, limit = 50, filter = 'all' } = req.query;
+
+        // Tự động cập nhật isPremium = false cho các user đã hết hạn trong DB
+        await User.updateMany(
+            { isPremium: true, premiumExpiresAt: { $lte: new Date() } },
+            { $set: { isPremium: false } }
+        );
 
         const query = {};
         if (filter === 'active') {
             query.isPremium = true;
             query.premiumExpiresAt = { $gt: new Date() };
         } else if (filter === 'expired') {
-            query.isPremium = true;
-            query.premiumExpiresAt = { $lte: new Date() };
+            // Đã hết hạn: isPremium = false nhưng có premiumExpiresAt trong quá khứ
+            query.isPremium = false;
+            query.premiumExpiresAt = { $lte: new Date(), $ne: null };
         } else if (filter === 'premium') {
             query.isPremium = true;
         }
@@ -381,6 +399,33 @@ export const grantPremium = async (req, res) => {
             },
             { new: true }
         );
+
+        // Gửi Socket event real-time đến user
+        try {
+            const io = getIO();
+            const expiresAtFormatted = expiresAt.toLocaleDateString('vi-VN');
+            io.to(`user:${id}`).emit('premium:activated', {
+                isPremium: true,
+                premiumExpiresAt: expiresAt.toISOString(),
+                premiumPlanCode: planCode,
+                source: 'admin_grant',
+                message: `Admin đã cấp Premium cho bạn! Hiệu lực đến ${expiresAtFormatted}.`,
+            });
+        } catch (socketErr) {
+            console.warn('[Socket] Không thể emit premium:activated (admin grant):', socketErr.message);
+        }
+
+        // Gửi FCM Push
+        sendPushNotification(id, {
+            title: '👑 Bạn đã được cấp Premium!',
+            body: `Admin đã cấp gói ${planCode} cho bạn. Hiệu lực đến ${expiresAt.toLocaleDateString('vi-VN')}.`,
+            data: {
+                type: 'premiumActivated',
+                planCode: planCode || '',
+                premiumExpiresAt: expiresAt.toISOString(),
+                source: 'admin_grant',
+            },
+        });
 
         return res.status(200).json({ success: true, user: toUserPremiumResponse(updated) });
     } catch (error) {
